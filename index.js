@@ -1,5 +1,6 @@
 const Writable = require('stream').Writable
 const pg = require('pg')
+const _ = require('lodash');
 
 class LogStream extends Writable {
   constructor (options) {
@@ -26,25 +27,68 @@ class LogStream extends Writable {
     }
 
     this.tableName = options.tableName
+    this.schema = options.schema
   }
 
   _writeKnex (chunk, env, cb) {
     const content = JSON.parse(chunk.toString())
     this.knex
-      .insert({
+      .insert(this._logColumns(content))
+      .into(this.tableName)
+      .asCallback(cb)
+  }
+
+  _logColumns (content) {
+    if (this.schema) {
+      const schemaObject = {}
+      const columnName = Object.keys(this.schema)
+      columnName.forEach(column => {
+        if (_.get(content, this.schema[column], null)) {
+          schemaObject[column] = _.get(content, this.schema[column], null)
+        }
+      })
+      return schemaObject
+    } else {
+      return {
         name: content.name,
         level: content.level,
         hostname: content.hostname,
         msg: content.msg,
         pid: content.pid,
         time: content.time,
-        content: JSON.stringify(content)
-      })
-      .into(this.tableName)
-      .asCallback(cb)
+        content: JSON.stringify(content).replace(/\'\'?/g, `''`)
+      }
+    }
+  }
+
+  _generateRawQuery (content) {
+    let query = `insert into ${this.tableName} (`;
+    const columnNames = Object.keys(this.schema);
+    columnNames.forEach(column => {
+      if(_.get(content,this.schema[column], null)){
+        query = `${query}${column},`
+      }
+    });
+    query = `${query.slice(0, -1)}) values (`;
+    columnNames.forEach(column => {
+      let data = _.get(content,this.schema[column], null);
+      if(data){
+        if(typeof data === 'object'){
+          data = JSON.stringify(data).replace(/\'\'?/g, `''`);
+        }
+        query = `${query} '${ data }',`
+      }
+    });
+    query = `${query.slice(0, -1)} )`;
+
+    return query;
   }
 
   writePgPool (client, content) {
+    if(this.schema){
+      return client.query(
+        this._generateRawQuery(content))
+    }
     return client.query({
       text: `insert into ${
         this.tableName

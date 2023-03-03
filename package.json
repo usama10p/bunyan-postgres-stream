@@ -8,6 +8,7 @@
     "url": "github.com/fdesjardins"
   },
   "dependencies": {
+    "loadash": "^1.0.0",
     "pg": "^8.0.2"
   },
   "devDependencies": {
